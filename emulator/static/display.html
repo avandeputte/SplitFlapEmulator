@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Split-Flap Wall</title>
+<style>
+  :root { --bg:#0b0b0d; --fg:#ddd; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:"Helvetica Neue",Arial,sans-serif; overflow:hidden; }
+  #wall { display:block; width:100vw; height:100vh; }
+  #hud { position:fixed; left:12px; bottom:10px; font-size:12px; color:#777; user-select:none; }
+  #hud b { color:#bbb; font-weight:600; }
+  #hud a { color:#8ab4ff; text-decoration:none; }
+  #btn { position:fixed; right:12px; bottom:10px; font-size:12px; color:#999; background:#1a1a1f; border:1px solid #333; border-radius:5px; padding:4px 10px; cursor:pointer; }
+  #btn:hover { color:#fff; }
+</style>
+</head>
+<body>
+<canvas id="wall"></canvas>
+<div id="hud"><b>Split-Flap Wall</b> · <span id="info">connecting…</span> · <a href="/">control panel</a></div>
+<button id="btn" title="Enable the flap click sound (browsers need a click first)">sound</button>
+<script>
+// The virtual wall. Every module is drawn from its MECHANICAL state -- the reel's angle and
+// where flap 0 truly sits -- exactly as a camera would see it, not from what the gateway or the
+// firmware think is showing. A miscalibrated module shows the wrong or a half-turned flap.
+(() => {
+  const cv = document.getElementById('wall');
+  const ctx = cv.getContext('2d');
+  const info = document.getElementById('info');
+  const COLOURS = { r:'#e0312b', o:'#f28c1e', y:'#f3d21f', g:'#3aa655', b:'#2871d6', p:'#ee7fb3', w:'#f4f4f4' };
+  let rows = 3, cols = 15, sound = true;
+  const mods = new Map();      // sn -> {slot,label,st,prev,lastShown}
+  let dpr = 1;
+
+  // ---- audio: a short mechanical click per landed flap ----
+  let audio = null, clickBuf = null;
+  function initAudio() {
+    if (audio) return;
+    audio = new (window.AudioContext || window.webkitAudioContext)();
+    const len = Math.floor(audio.sampleRate * 0.012);
+    clickBuf = audio.createBuffer(1, len, audio.sampleRate);
+    const d = clickBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3) * 0.6;
+  }
+  function click() {
+    if (!audio || !sound) return;
+    const s = audio.createBufferSource(); s.buffer = clickBuf;
+    const g = audio.createGain(); g.gain.value = 0.25 + Math.random() * 0.2;
+    const f = audio.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800 + Math.random() * 900;
+    s.connect(f); f.connect(g); g.connect(audio.destination); s.start();
+  }
+  document.getElementById('btn').onclick = () => { initAudio(); audio.resume(); document.getElementById('btn').textContent = 'sound on'; };
+
+  // ---- state ----
+  function applySnapshot(s) {
+    rows = s.rows; cols = s.cols; sound = s.sound;
+    for (const m of s.modules) {
+      const e = mods.get(m.cfg.sn) || { prev: null, st: null, lastShown: -1 };
+      e.slot = m.cfg.slot; e.label = m.cfg.label; e.online = m.state.online;
+      if (m.state && m.state.pos !== undefined) { e.prev = e.st; e.st = m.state; }
+      mods.set(m.cfg.sn, e);
+    }
+    for (const sn of [...mods.keys()]) if (!s.modules.find(m => m.cfg.sn === sn)) mods.delete(sn);
+    info.textContent = `${rows} × ${cols} · ${s.modules.length} modules · ${s.speed}× time`;
+  }
+  function applyState(states) {
+    const now = performance.now();
+    for (const sn in states) {
+      const e = mods.get(sn); if (!e) continue;
+      const st = states[sn]; st._at = now;
+      e.prev = e.st; e.st = st;
+      if (st.offline) e.online = false; else if (!st.offline && st.up !== undefined) e.online = true;
+    }
+  }
+  function connect() {
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    ws.onmessage = ev => {
+      const m = JSON.parse(ev.data);
+      if (m.type === 'snapshot') applySnapshot(m.data);
+      else if (m.type === 'state') applyState(m.modules);
+    };
+    ws.onclose = () => { info.textContent = 'reconnecting…'; setTimeout(connect, 1500); };
+    ws.onerror = () => ws.close();
+  }
+  connect();
+
+  // ---- geometry ----
+  function layout() {
+    dpr = window.devicePixelRatio || 1;
+    cv.width = Math.floor(innerWidth * dpr); cv.height = Math.floor(innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', layout); layout();
+
+  // Which flap is physically in front, and how far the leaf has fallen.
+  // x = reel angle past flap 0 (half-steps). The transition to the next flap happens in the last
+  // 45% of each flap's arc: the top leaf is released, falls, and lands as the next flap.
+  function shown(st, tNow) {
+    let pos = st.pos;
+    // interpolate between the last two reports for smooth motion
+    if (st._at && st._prevPos !== undefined && st.moving) {
+      const dt = (tNow - st._at) / 1000;
+      pos = st.pos + Math.min(dt, 0.08) * st._vel;
+    }
+    const spf = st.rev / st.flaps;
+    const x = ((pos - st.off) % st.rev + st.rev) % st.rev;
+    const idx = Math.floor(x / spf) % st.flaps;
+    const frac = (x - idx * spf) / spf;
+    return { idx, next: (idx + 1) % st.flaps, frac };
+  }
+  function glyphOf(st, i) {
+    const hex = st.charsHex || '';
+    if (i * 2 + 1 >= hex.length) return ' ';
+    const b = parseInt(hex.substr(i * 2, 2), 16);
+    return b < 0x80 ? String.fromCharCode(b) : cp1252(b);
+  }
+  const CP = {0x80:'€',0x82:'‚',0x83:'ƒ',0x84:'„',0x85:'…',0x86:'†',0x87:'‡',0x88:'ˆ',0x89:'‰',0x8A:'Š',0x8B:'‹',0x8C:'Œ',0x8E:'Ž',0x91:'‘',0x92:'’',0x93:'“',0x94:'”',0x95:'•',0x96:'–',0x97:'—',0x98:'˜',0x99:'™',0x9A:'š',0x9B:'›',0x9C:'œ',0x9E:'ž',0x9F:'Ÿ'};
+  function cp1252(b) { return CP[b] || String.fromCharCode(b); }
+
+  // ---- drawing ----
+  function drawHalf(x, y, w, h, ch, top, scaleY) {
+    // one half of a flap face: dark card with the upper or lower half of the glyph (or a colour)
+    ctx.save();
+    ctx.translate(x, y + (top ? h : 0));
+    ctx.scale(1, scaleY);
+    ctx.translate(0, top ? -h : 0);
+    ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
+    const colour = COLOURS[ch];
+    ctx.fillStyle = colour || '#141416';
+    ctx.fillRect(0, 0, w, h);
+    if (!colour) {
+      // subtle card shading
+      const g = ctx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, top ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)');
+      g.addColorStop(1, top ? 'rgba(0,0,0,0.05)' : 'rgba(0,0,0,0.25)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      if (ch !== ' ') {
+        ctx.fillStyle = '#f2f2f2';
+        ctx.font = `700 ${Math.round(h * 1.55)}px "Helvetica Neue",Helvetica,Arial,sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(ch, w / 2, top ? h : 0);
+      }
+    }
+    ctx.restore();
+  }
+  function drawModule(e, x, y, w, h, tNow) {
+    const st = e.st;
+    // body
+    ctx.fillStyle = '#0e0e10';
+    roundRect(x, y, w, h, w * 0.06); ctx.fill();
+    ctx.strokeStyle = '#26262a'; ctx.lineWidth = 1; ctx.stroke();
+    // printed slot number on the top face
+    ctx.fillStyle = '#c9c9c9';
+    ctx.font = `500 ${Math.max(8, h * 0.075)}px "Helvetica Neue",Arial,sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(e.label || String(e.slot), x + w / 2, y + h * 0.075);
+    // window
+    const wx = x + w * 0.08, wy = y + h * 0.15, ww = w * 0.84, wh = h * 0.78;
+    const hh = wh / 2;
+    ctx.fillStyle = '#000'; ctx.fillRect(wx - 1, wy - 1, ww + 2, wh + 2);
+    if (!e.online || !st || st.pos === undefined) {
+      drawHalf(wx, wy, ww, hh, ' ', true, 1); drawHalf(wx, wy + hh, ww, hh, ' ', false, 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(wx, wy, ww, wh);
+    } else {
+      const s = shown(st, tNow);
+      const cur = glyphOf(st, s.idx), nxt = glyphOf(st, s.next);
+      const t0 = 0.5, t1 = 0.92;
+      let a = 0;                                   // leaf angle 0..1 (0 = up, 1 = landed)
+      if (s.frac > t0) a = Math.min(1, (s.frac - t0) / (t1 - t0));
+      a = a * a * (3 - 2 * a);                     // ease
+      if (a >= 1 && e.lastShown !== s.next) { e.lastShown = s.next; click(); }
+      else if (a === 0 && e.lastShown !== s.idx) { e.lastShown = s.idx; }
+      // behind the falling leaf: top shows the next flap once the leaf starts to move
+      drawHalf(wx, wy, ww, hh, a > 0 ? nxt : cur, true, 1);
+      drawHalf(wx, wy + hh, ww, hh, a >= 1 ? nxt : cur, false, 1);
+      if (a > 0 && a < 1) {
+        if (a < 0.5) drawHalf(wx, wy, ww, hh, cur, true, 1 - a * 2);       // front of the leaf, folding down
+        else drawHalf(wx, wy + hh, ww, hh, nxt, false, (a - 0.5) * 2);    // its back, landing
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(wx, wy + hh, ww, hh * (a < 0.5 ? 0.15 : 0.05));
+      }
+    }
+    // seam and pivots
+    ctx.fillStyle = '#000'; ctx.fillRect(wx, wy + hh - 1, ww, 2);
+    ctx.fillStyle = '#2a2a2e';
+    ctx.fillRect(x + w * 0.02, wy + hh - h * 0.02, w * 0.06, h * 0.04);
+    ctx.fillRect(x + w * 0.92, wy + hh - h * 0.02, w * 0.06, h * 0.04);
+    if (st && st.coils && e.online) { ctx.fillStyle = 'rgba(255,200,60,0.9)'; ctx.fillRect(x + w * 0.46, y + h * 0.955, w * 0.08, h * 0.012); }
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function frame() {
+    const tNow = performance.now();
+    ctx.fillStyle = '#0b0b0d'; ctx.fillRect(0, 0, innerWidth, innerHeight);
+    const W = innerWidth - 40, H = innerHeight - 60;
+    const gap = 0.08;
+    let cw = Math.min(W / (cols + (cols - 1) * gap), (H / (rows + (rows - 1) * gap)) / 1.42);
+    const ch = cw * 1.42;
+    const totalW = cols * cw + (cols - 1) * cw * gap, totalH = rows * ch + (rows - 1) * cw * gap;
+    const ox = (innerWidth - totalW) / 2, oy = (innerHeight - 30 - totalH) / 2;
+    // the rail behind the modules
+    ctx.fillStyle = '#151518'; roundRect(ox - cw * 0.15, oy - cw * 0.12, totalW + cw * 0.3, totalH + cw * 0.24, cw * 0.1); ctx.fill();
+    for (const e of mods.values()) {
+      if (e.slot >= rows * cols) continue;
+      const r = Math.floor(e.slot / cols), c = e.slot % cols;
+      const x = ox + c * (cw + cw * gap), y = oy + r * (ch + cw * gap);
+      // velocity estimate for interpolation
+      if (e.st && e.prev && e.st.up !== e.prev.up) {
+        let d = e.st.pos - e.prev.pos; if (d < -e.st.rev / 2) d += e.st.rev;
+        e.st._vel = d / Math.max(0.001, (e.st.up - e.prev.up) / 1000); e.st._prevPos = e.prev.pos;
+      }
+      drawModule(e, x, y, cw, ch, tNow);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

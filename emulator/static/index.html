@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Split-Flap Emulator</title>
+<style>
+  :root { --bg:#111216; --card:#1a1c22; --line:#2b2e37; --txt:#e6e6e6; --dim:#8a8f9c; --acc:#7c5cff; --ok:#4caf50; --warn:#ffc107; --bad:#e94560; --cyan:#26c6da; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif; }
+  header { display:flex; align-items:center; gap:16px; padding:10px 18px; background:#0d0e12; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:1.05rem; margin:0; letter-spacing:.5px; }
+  header h1 span { color:var(--acc); }
+  header a { color:#8ab4ff; text-decoration:none; font-size:.9rem; }
+  header .sp { flex:1; }
+  main { padding:14px 18px; display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  @media (max-width:1100px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .card h2 { font-size:.85rem; margin:0 0 8px; color:var(--acc); text-transform:uppercase; letter-spacing:.08em; }
+  .wide { grid-column: 1 / -1; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  label { color:var(--dim); font-size:.8rem; }
+  input[type=number], input[type=text], select { background:#0d1016; border:1px solid var(--line); color:var(--txt); padding:4px 7px; border-radius:4px; font-size:.85rem; width:90px; }
+  input[type=range] { width:140px; }
+  button { background:var(--acc); border:none; color:#fff; padding:5px 11px; border-radius:4px; cursor:pointer; font-size:.82rem; }
+  button.sec { background:#2b2e37; } button.bad { background:var(--bad); } button.warn { background:var(--warn); color:#000; } button:disabled { opacity:.4; cursor:default; }
+  .stat { display:inline-block; background:#0d1016; border:1px solid var(--line); border-radius:6px; padding:6px 10px; min-width:90px; text-align:center; }
+  .stat .v { font-weight:600; font-size:1rem; } .stat .k { font-size:.68rem; color:var(--dim); text-transform:uppercase; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); } .dim { color:var(--dim); }
+  table { width:100%; border-collapse:collapse; font-size:.8rem; }
+  th, td { text-align:left; padding:4px 6px; border-bottom:1px solid #22242c; white-space:nowrap; }
+  th { color:var(--dim); font-weight:500; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  tr.sel td { background:#1f2230; }
+  tr:hover td { background:#1c1f28; cursor:pointer; }
+  .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .flap { display:inline-block; width:22px; height:28px; background:#000; color:#fff; border-radius:3px; text-align:center; line-height:28px; font-weight:700; font-family:Helvetica,Arial,sans-serif; border:1px solid #333; }
+  #wire, #console { background:#080a0f; border:1px solid var(--line); border-radius:6px; height:260px; overflow:auto; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.75rem; padding:4px 6px; }
+  .wl { display:flex; gap:8px; padding:1px 0; border-bottom:1px solid #12141a; }
+  .wl .t { color:var(--dim); min-width:78px; } .wl .f { min-width:90px; color:#ffb74d; } .wl .f.mod { color:#4dd0e1; } .wl .c { color:var(--bad); }
+  .detail { margin-top:10px; padding:10px; background:#0d1016; border:1px solid var(--line); border-radius:6px; }
+  .grid3 { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px; }
+  .kv { font-size:.8rem; } .kv b { color:var(--dim); font-weight:500; margin-right:4px; }
+  .pill { display:inline-block; padding:0 6px; border-radius:9px; font-size:.68rem; background:#2b2e37; }
+  .pill.on { background:#1f5a2a; } .pill.off { background:#5a2030; }
+  .mods { max-height:560px; overflow:auto; }
+  small.note { color:var(--dim); font-size:.72rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SPLIT-FLAP <span>EMULATOR</span></h1>
+  <a id="gwlink" href="#" target="_blank">Gateway dashboard ↗</a>
+  <a href="/display" target="_blank">Virtual wall ↗</a>
+  <span class="sp"></span>
+  <label>Time <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1× (real)</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="20">20×</option></select></label>
+  <label><input type="checkbox" id="ideal"> ideal bus</label>
+  <label><input type="checkbox" id="sound"> sound</label>
+  <span id="conn" class="dim">connecting…</span>
+</header>
+<main>
+  <section class="card">
+    <h2>Gateway board</h2>
+    <div class="row">
+      <div class="stat"><div class="v" id="gw-run">–</div><div class="k">state</div></div>
+      <div class="stat"><div class="v" id="gw-up">–</div><div class="k">uptime</div></div>
+      <div class="stat"><div class="v" id="gw-boots">–</div><div class="k">boots</div></div>
+      <div class="stat"><div class="v" id="gw-cause">–</div><div class="k">last reset</div></div>
+      <div class="stat"><div class="v" id="gw-wifi">–</div><div class="k">wifi</div></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="gw-power">Power off</button>
+      <button class="sec" onclick="post('/api/emu/gateway/reset',{kind:'reboot'})">Reset button</button>
+      <button class="sec" onclick="post('/api/emu/gateway/reset',{kind:'powercycle'})">Power cycle</button>
+      <button class="sec" id="gw-wifibtn">Pull WiFi</button>
+      <label>RSSI <input type="range" id="rssi" min="-95" max="-30" value="-58"> <span id="rssiv">-58</span> dBm</label>
+      <a href="/api/emu/gateway/nvs" target="_blank" style="color:#8ab4ff;font-size:.8rem">NVS ↗</a>
+    </div>
+    <small class="note">The dashboard, REST API, MQTT and OTA are the real gateway firmware (v3.13.1) running natively. Configure it there, exactly as you would on hardware.</small>
+  </section>
+
+  <section class="card">
+    <h2>Wall &amp; bus</h2>
+    <div class="row">
+      <label>Rows <input type="number" id="rows" min="1" max="16"></label>
+      <label>Cols <input type="number" id="cols" min="1" max="64"></label>
+      <button id="wall-apply" class="sec">Resize wall</button>
+      <span class="dim" id="wallinfo"></span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>Frame loss <input type="range" id="drop" min="0" max="0.2" step="0.005" value="0"> <span id="dropv">0%</span></label>
+      <label>Noise <input type="range" id="noise" min="0" max="0.05" step="0.001" value="0"> <span id="noisev">0%</span></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div class="stat"><div class="v" id="b-bytes">0</div><div class="k">bytes</div></div>
+      <div class="stat"><div class="v" id="b-frames">0</div><div class="k">frames</div></div>
+      <div class="stat"><div class="v" id="b-coll">0</div><div class="k">collisions</div></div>
+      <div class="stat"><div class="v" id="b-drop">0</div><div class="k">dropped</div></div>
+      <div class="stat"><div class="v" id="b-clients">0</div><div class="k">on the bus</div></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="bad" id="factory">Factory-fresh everything</button>
+      <small class="note">Modules come back blank and advertising; the gateway forgets its settings and module list.</small>
+    </div>
+  </section>
+
+  <section class="card wide">
+    <h2>Modules <span class="dim" id="modcount"></span></h2>
+    <div class="mods"><table id="mods"><thead><tr><th>Slot</th><th>Serial</th><th>ID</th><th>Shows</th><th>FW idx</th><th>Reel</th><th>Home offset (true / fw)</th><th>Rev (true / fw)</th><th>Faults</th><th>State</th></tr></thead><tbody></tbody></table></div>
+    <div id="detail" class="detail" style="display:none"></div>
+  </section>
+
+  <section class="card">
+    <h2>Wire monitor <small class="note">everything on the RS-485 pair, as an analyser would see it</small></h2>
+    <div id="wire"></div>
+  </section>
+  <section class="card">
+    <h2>Console <select id="csrc" style="width:auto"><option value="gateway">gateway</option></select></h2>
+    <div id="console"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let snap = null, sel = null, states = {};
+async function post(url, body) {
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {})});
+  if (!r.ok) alert(await r.text());
+  refresh();
+  return r;
+}
+async function refresh() { snap = await (await fetch('/api/emu/state')).json(); render(); }
+function fmtUp(s) { s = Math.floor(s); if (s < 90) return s + 's'; if (s < 5400) return Math.floor(s/60) + 'm'; return (s/3600).toFixed(1) + 'h'; }
+const GW_REASONS = {0:'unknown',1:'power-on',2:'ext reset',3:'software',4:'panic',5:'int wdt',6:'task wdt',7:'wdt',8:'deep sleep',9:'brown-out'};
+const MOD_REASONS = c => [c&1?'POR':'',c&2?'BOR':'',c&4?'EXT':'',c&8?'WDT':'',c&16?'SW':''].filter(Boolean).join('+') || '–';
+function glyph(st, i) {
+  const hex = st.charsHex || ''; if (i < 0 || i*2+1 >= hex.length) return '?';
+  const b = parseInt(hex.substr(i*2, 2), 16); return String.fromCharCode(b);
+}
+function shownOf(st) {
+  if (!st || st.pos === undefined) return null;
+  const spf = st.rev / st.flaps; const x = ((st.pos - st.off) % st.rev + st.rev) % st.rev;
+  return { idx: Math.floor(x / spf) % st.flaps, frac: (x % spf) / spf };
+}
+function render() {
+  if (!snap) return;
+  $('gwlink').href = snap.gateway.url;
+  $('speed').value = String(snap.speed); $('ideal').checked = snap.bus.ideal; $('sound').checked = snap.sound;
+  $('rows').value = snap.rows; $('cols').value = snap.cols; $('wallinfo').textContent = `${snap.modules.length} modules`;
+  $('drop').value = snap.bus.drop; $('dropv').textContent = (snap.bus.drop*100).toFixed(1) + '%';
+  $('noise').value = snap.bus.noise; $('noisev').textContent = (snap.bus.noise*100).toFixed(1) + '%';
+  const b = snap.bus.stats; $('b-bytes').textContent = b.bytes; $('b-frames').textContent = b.frames; $('b-coll').textContent = b.collisions; $('b-drop').textContent = b.dropped; $('b-clients').textContent = snap.bus.clients;
+  const g = snap.gateway;
+  $('gw-run').innerHTML = g.proc.running ? '<span class="ok">running</span>' : (g.cfg.power ? '<span class="warn">starting</span>' : '<span class="bad">off</span>');
+  $('gw-up').textContent = g.proc.running ? fmtUp(g.proc.uptime) : '–';
+  $('gw-boots').textContent = g.proc.boots || 0;
+  $('gw-cause').textContent = GW_REASONS[g.proc.cause] || g.proc.cause;
+  $('gw-wifi').innerHTML = g.cfg.wifi ? '<span class="ok">up</span>' : '<span class="bad">down</span>';
+  $('gw-power').textContent = g.cfg.power ? 'Power off' : 'Power on';
+  $('gw-power').onclick = () => post('/api/emu/gateway/power', {on: !g.cfg.power});
+  $('gw-wifibtn').textContent = g.cfg.wifi ? 'Pull WiFi' : 'Restore WiFi';
+  $('gw-wifibtn').onclick = () => post('/api/emu/gateway/wifi', {up: !g.cfg.wifi});
+  $('rssi').value = g.cfg.rssi; $('rssiv').textContent = g.cfg.rssi;
+  const tb = $('mods').querySelector('tbody'); tb.innerHTML = '';
+  $('modcount').textContent = `(${snap.modules.length})`;
+  const opts = ['<option value="gateway">gateway</option>'];
+  for (const m of snap.modules) {
+    const st = states[m.cfg.sn] || m.state || {};
+    const on = m.proc.running && !st.offline;
+    const sh = shownOf(st);
+    const tr = document.createElement('tr'); tr.dataset.sn = m.cfg.sn; if (sel === m.cfg.sn) tr.className = 'sel';
+    const faults = [st.fault && st.fault.hall !== 'ok' ? 'hall:' + st.fault.hall : '', st.fault && st.fault.motor !== 'ok' ? 'motor dead' : '', st.fault && st.fault.slip > 0 ? 'slip ' + (st.fault.slip*100).toFixed(0) + '%' : ''].filter(Boolean).join(', ');
+    const id = st.id === undefined ? '–' : (st.id === 255 ? '<span class="warn">unprov.</span>' : st.id);
+    tr.innerHTML = `<td>${m.cfg.slot}</td><td class="mono">${m.cfg.sn}</td><td>${on ? id : '–'}</td>
+      <td>${on && sh ? `<span class="flap">${glyph(st, sh.idx)}</span> <span class="dim">${sh.frac > 0.5 ? '½' : ''}</span>` : '<span class="flap dim">·</span>'}</td>
+      <td>${on && st.fw ? (st.fw.idx < 0 ? '<span class="warn">' + st.fw.idx + '</span>' : st.fw.idx) : '–'}</td>
+      <td>${on ? st.pos + ' / ' + st.rev : '–'}</td>
+      <td>${st.off !== undefined ? st.off : '–'} / ${st.fw ? st.fw.off : '–'} ${st.fw && Math.abs(st.fw.off - st.off) > 12 ? '<span class="warn">±' + Math.abs(st.fw.off - st.off) + '</span>' : ''}</td>
+      <td>${st.rev || '–'} / ${st.fw ? st.fw.rev : '–'}</td>
+      <td class="warn">${faults}</td>
+      <td>${m.proc.running ? (st.offline ? '<span class="pill off">crashed</span>' : `<span class="pill on">${st.moving ? 'moving' : (st.coils ? 'holding' : 'idle')}</span>`) : '<span class="pill off">off</span>'}</td>`;
+    tr.onclick = () => { sel = m.cfg.sn; render(); };
+    tb.appendChild(tr);
+    opts.push(`<option value="${m.cfg.sn}">slot ${m.cfg.slot} · ${m.cfg.sn.slice(-4)}</option>`);
+  }
+  const cs = $('csrc'); const cur = cs.value; cs.innerHTML = opts.join(''); cs.value = cur || 'gateway';
+  renderDetail();
+}
+function renderDetail() {
+  const d = $('detail');
+  const m = snap && snap.modules.find(x => x.cfg.sn === sel);
+  if (!m) { d.style.display = 'none'; return; }
+  const st = states[sel] || m.state || {}; const mech = m.cfg.mech; const sh = shownOf(st);
+  d.style.display = '';
+  d.innerHTML = `
+    <div class="row" style="justify-content:space-between"><b>Slot ${m.cfg.slot} · <span class="mono">${m.cfg.sn}</span></b>
+      <span><button class="sec" onclick="post('/api/emu/modules/${sel}/power',{on:${!m.cfg.power}})">${m.cfg.power ? 'Power off' : 'Power on'}</button>
+      <button class="sec" onclick="post('/api/emu/modules/${sel}/reset',{kind:'reset'})">Reset</button>
+      <button class="warn" onclick="post('/api/emu/modules/${sel}/reset',{kind:'brownout',corrupt:false})">Brown-out</button>
+      <button class="warn" onclick="post('/api/emu/modules/${sel}/reset',{kind:'brownout',corrupt:true})">Brown-out + EEPROM corruption</button>
+      <button class="bad" onclick="if(confirm('Erase this module\\'s EEPROM (reflash without EEPROM retained)?'))post('/api/emu/modules/${sel}/reset',{kind:'eeprom'})">Blank EEPROM</button>
+      <button class="bad" onclick="if(confirm('Unplug and discard this module?'))fetch('/api/emu/modules/${sel}',{method:'DELETE'}).then(refresh)">Remove</button></span></div>
+    <div class="grid3" style="margin-top:8px">
+      <div class="kv"><b>Firmware</b> v32 · idx ${st.fw ? st.fw.idx : '–'} · step ${st.fw ? st.fw.step : '–'} · parser ${st.fw ? st.fw.parse : '–'} · wdt ${st.fw && st.fw.wdt ? 'on' : 'off'}</div>
+      <div class="kv"><b>Boots</b> ${st.boot || 0} · last reset ${MOD_REASONS(st.cause || 0)} · up ${st.up !== undefined ? fmtUp(st.up/1000) : '–'} (virtual)</div>
+      <div class="kv"><b>Physically showing</b> ${sh ? `flap ${sh.idx} "${glyph(st, sh.idx)}" (${(sh.frac*100).toFixed(0)}% into its arc)` : '–'}</div>
+      <div class="kv"><b>Next advert</b> ${st.id === 255 && st.fw ? Math.max(0, (st.fw.nextAdv - st.fw.ms)/1000).toFixed(1) + ' s' : 'provisioned'}</div>
+      <div class="kv"><b>EEPROM</b> <a href="/api/emu/modules/${sel}/eeprom" target="_blank" style="color:#8ab4ff">dump ↗</a></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label>True home offset <input type="number" id="m-offset" value="${mech.offset}"></label>
+      <label>Steps / rev <input type="number" id="m-rev" value="${mech.rev}"></label>
+      <label>Magnet width <input type="number" id="m-magnet" value="${mech.magnet}"></label>
+      <label>Hall active <select id="m-hallLow" style="width:auto"><option value="true" ${mech.hallLow?'selected':''}>LOW</option><option value="false" ${!mech.hallLow?'selected':''}>HIGH</option></select></label>
+      <label>VCC mV <input type="number" id="m-vcc" value="${mech.vcc}"></label>
+      <label>Label <input type="text" id="m-label" value="${m.cfg.label || ''}" style="width:70px"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>Hall fault <select id="m-hall" style="width:auto">${['ok','stuck_active','stuck_inactive','noisy','inverted'].map(v=>`<option ${mech.hall===v?'selected':''}>${v}</option>`).join('')}</select></label>
+      <label>Motor <select id="m-motor" style="width:auto">${['ok','dead'].map(v=>`<option ${mech.motor===v?'selected':''}>${v}</option>`).join('')}</select></label>
+      <label>Missed steps <input type="range" id="m-slip" min="0" max="0.2" step="0.005" value="${mech.slip}"> <span id="m-slipv">${(mech.slip*100).toFixed(1)}%</span></label>
+      <label>Reel chars <input type="text" id="m-chars" value="${mech.chars.replace(/"/g,'&quot;')}" style="width:420px" class="mono"></label>
+      <button id="m-apply">Apply mechanics</button>
+    </div>
+    <small class="note">These are the physical facts the firmware cannot know: it must be calibrated to them, as on hardware. Changing them on a running module is like re-mounting its magnet or reel.</small>`;
+  $('m-slip').oninput = () => $('m-slipv').textContent = (parseFloat($('m-slip').value)*100).toFixed(1) + '%';
+  $('m-apply').onclick = () => post(`/api/emu/modules/${sel}/mech`, {
+    offset: +$('m-offset').value, rev: +$('m-rev').value, magnet: +$('m-magnet').value, hallLow: $('m-hallLow').value === 'true',
+    vcc: +$('m-vcc').value, hall: $('m-hall').value, motor: $('m-motor').value, slip: +$('m-slip').value, chars: $('m-chars').value, label: $('m-label').value });
+}
+$('factory').onclick = () => { if (confirm('Wipe every module EEPROM, the gateway flash and start a fresh wall?')) post('/api/emu/factory-reset', {}); };
+$('speed').onchange = () => post('/api/emu/speed', {speed: +$('speed').value});
+$('ideal').onchange = () => post('/api/emu/bus', {ideal: $('ideal').checked});
+$('sound').onchange = () => post('/api/emu/sound', {sound: $('sound').checked});
+$('drop').onchange = () => post('/api/emu/bus', {drop: +$('drop').value});
+$('noise').onchange = () => post('/api/emu/bus', {noise: +$('noise').value});
+$('drop').oninput = () => $('dropv').textContent = (+$('drop').value*100).toFixed(1) + '%';
+$('noise').oninput = () => $('noisev').textContent = (+$('noise').value*100).toFixed(1) + '%';
+$('rssi').oninput = () => $('rssiv').textContent = $('rssi').value;
+$('rssi').onchange = () => post('/api/emu/gateway/wifi', {rssi: +$('rssi').value});
+$('wall-apply').onclick = () => { if (confirm('Resizing discards modules beyond the new wall and adds fresh ones for new slots. Continue?')) post('/api/emu/wall', {rows: +$('rows').value, cols: +$('cols').value}); };
+
+// ---- live stream ----
+const wire = $('wire'), cons = $('console');
+let wireN = 0, lastRender = 0;
+function addWire(f) {
+  const el = document.createElement('div'); el.className = 'wl';
+  const t = new Date(f.wall * 1000).toLocaleTimeString(undefined, {hour12:false}) + '.' + String(Math.floor((f.wall % 1) * 1000)).padStart(3,'0');
+  const from = f.kind === 'gateway' ? 'GATEWAY' : f.from.slice(-6);
+  el.innerHTML = `<span class="t">${t}</span><span class="f ${f.kind === 'module' ? 'mod' : ''}">${from}</span><span class="${f.corrupt ? 'c' : ''}">${escapeHtml(f.data.replace(/\n/g,'⏎'))}${f.corrupt ? ' ⚠ collision' : ''}</span>`;
+  wire.appendChild(el); if (++wireN > 400) { wire.removeChild(wire.firstChild); }
+  wire.scrollTop = wire.scrollHeight;
+}
+function addLog(l) {
+  if (l.src !== $('csrc').value) return;
+  const el = document.createElement('div'); el.textContent = escapeHtml(l.text); el.innerHTML = el.textContent;
+  cons.appendChild(el); while (cons.childNodes.length > 500) cons.removeChild(cons.firstChild);
+  cons.scrollTop = cons.scrollHeight;
+}
+function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+$('csrc').onchange = async () => { cons.innerHTML = ''; const r = await (await fetch('/api/emu/log?src=' + $('csrc').value)).json(); r.lines.forEach(addLog); };
+function connect() {
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onopen = () => { $('conn').textContent = 'live'; $('conn').className = 'ok'; };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'snapshot') { snap = m.data; states = {}; for (const x of snap.modules) states[x.cfg.sn] = x.state; render(); if (m.wire) m.wire.forEach(addWire); $('csrc').onchange(); }
+    else if (m.type === 'state') { Object.assign(states, m.modules); const now = performance.now(); if (now - lastRender > 400) { lastRender = now; render(); } }
+    else if (m.type === 'wire') m.frames.forEach(addWire);
+    else if (m.type === 'log') m.lines.forEach(addLog);
+  };
+  ws.onclose = () => { $('conn').textContent = 'reconnecting…'; $('conn').className = 'bad'; setTimeout(connect, 1500); };
+}
+connect();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

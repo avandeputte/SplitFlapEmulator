@@ -1,0 +1,7 @@
+.git
+**/build
+bin
+data
+**/__pycache__
+*.log
+screenshots

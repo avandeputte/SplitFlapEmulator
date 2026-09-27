@@ -1,0 +1,61 @@
+# SplitFlap Emulator
+#
+#   docker compose up -d                       the emulator alone
+#   docker compose --profile mqtt up -d        + a Mosquitto broker (point the gateway's MQTT settings at "mosquitto")
+#   docker compose --profile companion up -d   + the SplitFlap Gateway Companion, already pointed at the emulated gateway
+#
+# Ports on the host:
+#   8080  the emulated gateway's dashboard and REST API (the real firmware's port 80)
+#   8090  the emulator's control panel (/) and virtual wall (/display)
+#   8000  the companion (profile "companion")
+#   1883  the MQTT broker (profile "mqtt")
+services:
+  emulator:
+    build: .
+    image: ghcr.io/avandeputte/splitflap-emulator:latest
+    container_name: splitflap-emulator
+    ports:
+      - "8080:80"
+      - "8090:8090"
+    volumes:
+      - emulator-data:/data
+    environment:
+      # How a browser on the host reaches the emulated gateway (used for links in the control panel).
+      SFEMU_GATEWAY_URL: "http://localhost:8080"
+      # Time runs at this pace (1 = the physical pace). Also adjustable live in the control panel.
+      # SFEMU_SPEED: "1"
+      # Wall size for a fresh data volume (later changes: control panel). Default 3 x 15.
+      # SFEMU_ROWS: "3"
+      # SFEMU_COLS: "15"
+    restart: unless-stopped
+
+  mosquitto:
+    profiles: ["mqtt"]
+    image: eclipse-mosquitto:2
+    container_name: splitflap-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  companion:
+    profiles: ["companion"]
+    image: ghcr.io/avandeputte/splitflap-gateway-companion:latest
+    container_name: splitflap-companion
+    depends_on:
+      - emulator
+    ports:
+      - "8000:8000"
+    volumes:
+      - companion-data:/data
+    environment:
+      GATEWAY_URL: "http://emulator:80"
+      COMPANION_PUBLIC_URL: "http://localhost:8000"
+      COMPANION_MODULE_ID_BASE: "0"
+      # COMPANION_MQTT_BROKER: "mosquitto"
+    restart: unless-stopped
+
+volumes:
+  emulator-data:
+  companion-data:
