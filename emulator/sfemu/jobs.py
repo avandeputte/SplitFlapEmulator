@@ -109,9 +109,9 @@ class WallJobs:
                 proc = self.emu.sup.procs.get(sn)
                 if proc is None or proc.proc is None:
                     continue                     # powered off: nothing to talk to
-                st = self.emu.module_state.get(sn, {})
-                if st.get("id") == slot:
-                    continue                     # it has the id; the gateway just has not confirmed it yet
+                # Sent even when the module already holds the id: mXI is idempotent for the module
+                # (same id, an ack) and the ack is what puts it in the gateway's registry -- a
+                # gateway that rebooted before its debounced registry save has forgotten it.
                 await self._post("/api/flap/provision", {"sn": sn, "id": slot})
                 await self._vsleep(0.6)          # the module acks ~20 ms later; the gateway then queries it
             # the gateway's post-provision version queries take a few seconds per module
