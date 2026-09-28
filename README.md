@@ -109,6 +109,12 @@ tests/         end-to-end tests that drive the real gateway REST API
 tools/         bustest.py (bus-level smoke test), sync_upstream.sh
 ```
 
+## Image
+
+`ghcr.io/avandeputte/splitflap-emulator` is built by GitHub Actions (`.github/workflows/ci.yml`)
+for amd64 and arm64 on every push to `main` (`:latest`) and on version tags (`:X.Y.Z`), after the
+end-to-end tests pass.
+
 ## Running without Docker
 
 ```sh
