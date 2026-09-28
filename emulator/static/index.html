@@ -98,6 +98,13 @@
       <div class="stat"><div class="v" id="b-clients">0</div><div class="k">on the bus</div></div>
     </div>
     <div class="row" style="margin-top:10px">
+      <button id="job-provision">Provision whole wall</button>
+      <button id="job-calibrate">Calibrate every module</button>
+      <button class="sec" id="job-cancel" style="display:none">Cancel</button>
+      <span id="jobstatus" class="dim"></span>
+    </div>
+    <small class="note">Both go through the gateway's own API (mXI by serial, then the restore-by-serial mXW frame with each reel's true offset and revolution, then a home by serial), so its registry and bus monitor see everything. Provisioning takes a few minutes at 1×: blank modules must finish homing to hear their frame.</small>
+    <div class="row" style="margin-top:10px">
       <button class="bad" id="factory">Factory-fresh everything</button>
       <small class="note">Modules come back blank and advertising; the gateway forgets its settings and module list.</small>
     </div>
@@ -159,6 +166,11 @@ function render() {
   $('gw-wifibtn').textContent = g.cfg.wifi ? 'Pull WiFi' : 'Restore WiFi';
   $('gw-wifibtn').onclick = () => post('/api/emu/gateway/wifi', {up: !g.cfg.wifi});
   $('rssi').value = g.cfg.rssi; $('rssiv').textContent = g.cfg.rssi;
+  const job = snap.job;
+  const running = job && job.state === 'running';
+  $('job-provision').disabled = running; $('job-calibrate').disabled = running;
+  $('job-cancel').style.display = running ? '' : 'none';
+  $('jobstatus').innerHTML = job ? `<span class="${job.state === 'done' ? 'ok' : job.state === 'running' ? 'warn' : 'bad'}">${job.name} ${job.state}</span> ${job.done}/${job.total} · ${escapeHtml(job.message || '')} · ${Math.round(job.elapsed)}s` : '';
   const tb = $('mods').querySelector('tbody'); tb.innerHTML = '';
   $('modcount').textContent = `(${snap.modules.length})`;
   const opts = ['<option value="gateway">gateway</option>'];
@@ -226,6 +238,9 @@ function renderDetail() {
     offset: +$('m-offset').value, rev: +$('m-rev').value, magnet: +$('m-magnet').value, hallLow: $('m-hallLow').value === 'true',
     vcc: +$('m-vcc').value, hall: $('m-hall').value, motor: $('m-motor').value, slip: +$('m-slip').value, chars: $('m-chars').value, label: $('m-label').value });
 }
+$('job-provision').onclick = () => post('/api/emu/wall/provision', {});
+$('job-calibrate').onclick = () => post('/api/emu/wall/calibrate', {});
+$('job-cancel').onclick = () => post('/api/emu/wall/job/cancel', {});
 $('factory').onclick = () => { if (confirm('Wipe every module EEPROM, the gateway flash and start a fresh wall?')) post('/api/emu/factory-reset', {}); };
 $('speed').onchange = () => post('/api/emu/speed', {speed: +$('speed').value});
 $('ideal').onchange = () => post('/api/emu/bus', {ideal: $('ideal').checked});
@@ -270,7 +285,7 @@ function connect() {
   ws.onclose = () => { $('conn').textContent = 'reconnecting…'; $('conn').className = 'bad'; setTimeout(connect, 1500); };
 }
 connect();
-setInterval(refresh, 5000);
+setInterval(() => refresh(), (snap && snap.job && snap.job.state === 'running') ? 2000 : 5000);
 </script>
 </body>
 </html>

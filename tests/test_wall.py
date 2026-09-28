@@ -120,3 +120,28 @@ def test_watchdog_and_faults(emu):
     t = emu.wait_until(result, 60)
     assert t and t["code"] == 2, t
     emu.emu.post(f"/api/emu/modules/{sn}/mech", json={"hall": "ok"})
+
+
+def test_wall_jobs_provision_and_calibrate(emu):
+    # The control panel shortcuts: everything goes through the gateway (mXI / mXW / mXH by serial).
+    # Blank a module first so provisioning has real work; the others are already provisioned.
+    st = emu.state()
+    sn = st["modules"][0]["cfg"]["sn"]
+    assert emu.emu.post(f"/api/emu/modules/{sn}/reset", json={"kind": "eeprom"}).status_code == 200
+    emu.wait_until(lambda: emu.module_state(sn).get("id") == 255 or None, 60)
+    r = emu.emu.post("/api/emu/wall/provision")
+    assert r.status_code == 200
+    job = emu.wait_until(lambda: (lambda j: j if j["state"] != "running" else None)(emu.emu.get("/api/emu/wall/job").json()), 300)
+    assert job and job["state"] == "done", job
+    for m in emu.state()["modules"]:
+        assert m["state"]["id"] == m["cfg"]["slot"]
+    assert emu.gw.get("/api/config").json()["gridCols"] == 4
+    r = emu.emu.post("/api/emu/wall/calibrate")
+    assert r.status_code == 200
+    job = emu.wait_until(lambda: (lambda j: j if j["state"] != "running" else None)(emu.emu.get("/api/emu/wall/job").json()), 240)
+    assert job and job["state"] == "done", job
+    for m in emu.state()["modules"]:
+        s, mech = m["state"], m["cfg"]["mech"]
+        assert s["fw"]["off"] == mech["offset"] and s["fw"]["rev"] == mech["rev"]
+        idx, frac = shown_index(s)
+        assert idx == 0 and frac < 0.05          # dead centre of flap 0 after the home

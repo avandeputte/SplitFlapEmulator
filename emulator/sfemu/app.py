@@ -21,6 +21,7 @@ from . import __version__
 from .bus import BusHub
 from .config import EmuConfig, ModuleCfg, Mech
 from .supervisor import Supervisor
+from .jobs import WallJobs
 from .vclock import VirtualClock
 
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
@@ -66,6 +67,7 @@ class Emulator:
         self.sup.on_log = self._on_log
         self.started = time.time()
         self._push_task: Optional[asyncio.Task] = None
+        self.jobs = WallJobs(self)
 
     async def start(self) -> None:
         await self.hub.start()
@@ -126,6 +128,7 @@ class Emulator:
                         "url": self.gateway_public_url, "port": self.gateway_http_port},
             "modules": modules,
             "uptime": time.time() - self.started,
+            "job": self.jobs.current.snapshot() if self.jobs.current else None,
         }
 
     async def broadcast(self, msg: dict) -> None:
@@ -281,6 +284,28 @@ def create_app(emu: Emulator) -> FastAPI:
     async def sound(body: dict) -> dict:
         emu.cfg.sound = bool(body.get("sound", True)); emu.save()
         return {"sound": emu.cfg.sound}
+
+    @app.post("/api/emu/wall/provision")
+    async def wall_provision() -> dict:
+        try:
+            return emu.jobs.start("provision").snapshot()
+        except RuntimeError as ex:
+            raise HTTPException(409, str(ex))
+
+    @app.post("/api/emu/wall/calibrate")
+    async def wall_calibrate() -> dict:
+        try:
+            return emu.jobs.start("calibrate").snapshot()
+        except RuntimeError as ex:
+            raise HTTPException(409, str(ex))
+
+    @app.get("/api/emu/wall/job")
+    async def wall_job() -> dict:
+        return emu.jobs.current.snapshot() if emu.jobs.current else {"state": "idle"}
+
+    @app.post("/api/emu/wall/job/cancel")
+    async def wall_job_cancel() -> dict:
+        return {"cancelled": emu.jobs.cancel()}
 
     @app.post("/api/emu/factory-reset")
     async def factory_reset() -> dict:
