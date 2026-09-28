@@ -16,6 +16,7 @@
 #include <math.h>
 #include <time.h>
 #include <sys/time.h>
+#include <type_traits>
 #include <stdarg.h>
 #include <inttypes.h>
 #include <unistd.h>
@@ -41,8 +42,10 @@ typedef uint8_t byte;
 #ifndef _min
 #define _min(a,b) ((a)<(b)?(a):(b))
 #endif
-template <typename A, typename B> inline auto min(A a, B b) -> decltype(a < b ? a : b) { return a < b ? a : b; }
-template <typename A, typename B> inline auto max(A a, B b) -> decltype(a > b ? a : b) { return a > b ? a : b; }
+// By value: a conditional of two lvalue parameters is an lvalue, and returning its decltype
+// would hand the caller a reference to a parameter that no longer exists.
+template <typename A, typename B> inline typename std::common_type<A, B>::type min(A a, B b) { return a < b ? a : b; }
+template <typename A, typename B> inline typename std::common_type<A, B>::type max(A a, B b) { return a > b ? a : b; }
 template <typename T> inline T constrain(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
 inline long map(long x, long in_min, long in_max, long out_min, long out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;

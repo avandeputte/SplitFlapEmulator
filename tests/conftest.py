@@ -74,6 +74,11 @@ class Emu:
             self.proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+        if os.environ.get("SFEMU_KEEP"):           # keep the data dir and print the emulator log
+            print(f"\n[emu] data kept at {self.data}")
+            with open(os.path.join(self.data, "emu.log"), "rb") as f:
+                print(f.read().decode("latin-1")[-6000:])
+            return
         shutil.rmtree(self.data, ignore_errors=True)
 
 

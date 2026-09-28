@@ -24,5 +24,4 @@
 #define snprintf_P snprintf
 #define vsnprintf_P vsnprintf
 class __FlashStringHelper;
-#define FPSTR(p) (reinterpret_cast<const __FlashStringHelper*>(p))
-#define F(s) FPSTR(s)
+// FPSTR() and F() come from the vendored WString.h (they wrap PSTR, defined above).
