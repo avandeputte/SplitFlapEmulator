@@ -148,20 +148,21 @@ def test_wall_jobs_provision_and_calibrate(emu):
 
 
 def test_perfect_mechanics(emu):
-    # Knock one module's reel out of true, then make every reel perfect: the physical offset and
-    # revolution become what the firmware believes, and the reel shows flap 0 dead centre at once.
-    m0 = emu.state()["modules"][0]
-    sn = m0["cfg"]["sn"]
-    emu.emu.post(f"/api/emu/modules/{sn}/mech", json={"offset": m0["cfg"]["mech"]["offset"] + 30})
-    emu.vsleep(1)
-    idx, frac = shown_index(emu.module_state(sn))
-    assert not (idx == 0 and frac < 0.05)
+    # Perfect = the textbook 2832 / 4096 on the reel AND in the firmware, and flap 0 dead centre.
     r = emu.emu.post("/api/emu/wall/perfect")
     assert r.status_code == 200 and r.json()["modules"] == 4
-    emu.vsleep(1)
+    job = emu.wait_until(lambda: (lambda j: j if j["state"] != "running" else None)(emu.emu.get("/api/emu/wall/job").json()), 240)
+    assert job and job["state"] == "done", job
     for m in emu.state()["modules"]:
         s, mech = m["state"], m["cfg"]["mech"]
-        assert mech["offset"] == s["fw"]["off"] and mech["rev"] == s["fw"]["rev"]
-        assert s["off"] == s["fw"]["off"] and s["rev"] == s["fw"]["rev"]
+        assert (mech["offset"], mech["rev"]) == (2832, 4096)
+        assert (s["off"], s["rev"]) == (2832, 4096) and (s["fw"]["off"], s["fw"]["rev"]) == (2832, 4096)
         idx, frac = shown_index(s)
         assert idx == 0 and frac < 0.05
+    # and a module blanked afterwards comes back perfect on its own: it measures 4096, defaults to 2832
+    sn = emu.state()["modules"][1]["cfg"]["sn"]
+    assert emu.emu.post(f"/api/emu/modules/{sn}/reset", json={"kind": "eeprom"}).status_code == 200
+    st = emu.wait_until(lambda: (lambda s: s if s.get("boot", 0) >= 2 and s.get("fw", {}).get("idx", -1) >= 0 and s.get("moving") is False else None)(emu.module_state(sn)), 90)
+    assert st and (st["fw"]["off"], st["fw"]["rev"]) == (2832, 4096)
+    idx, frac = shown_index(st)
+    assert idx == 0 and frac < 0.05

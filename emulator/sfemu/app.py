@@ -208,17 +208,18 @@ class Emulator:
         return m
 
     def perfect_mechanics(self, sn: Optional[str] = None) -> int:
-        """Set a module's (or every module's) TRUE home offset and revolution to exactly what its
-        firmware believes -- the firmware's default 2832 and the revolution it measured, or the
-        chip's nominal 2832 / 4096 if it has not reported yet. The reel is then perfectly
-        calibrated without a single frame on the bus, like a module built to spec."""
+        """Set a module's (or every module's) TRUE home offset and revolution to the textbook
+        values the firmware is built around: 2832 half-steps from the Hall edge to flap 0 and a
+        4096 half-step revolution. A blank module then measures 4096 on its first boot and its
+        default offset is exactly right -- perfect out of the box, and after any factory reset.
+        A module whose firmware already holds different (measured) values is written to match
+        through the gateway by the "perfect" job (mXW by serial, then a home)."""
         n = 0
         for m in self.cfg.modules:
             if sn is not None and m.sn != sn:
                 continue
-            fw = self.module_state.get(m.sn, {}).get("fw", {})
-            m.mech.offset = int(fw.get("off") or 2832)
-            m.mech.rev = int(fw.get("rev") or 4096)
+            m.mech.offset = 2832
+            m.mech.rev = 4096
             self.hub.ctl(m.sn, self.cfg.mech_message(m))
             n += 1
         self.save()
@@ -318,13 +319,23 @@ def create_app(emu: Emulator) -> FastAPI:
 
     @app.post("/api/emu/wall/perfect")
     async def wall_perfect() -> dict:
-        return {"modules": emu.perfect_mechanics()}
+        n = emu.perfect_mechanics()
+        try:
+            job = emu.jobs.start("perfect").snapshot()      # bring each firmware to 2832 / 4096 too
+        except RuntimeError as ex:
+            raise HTTPException(409, str(ex))
+        return {"modules": n, "job": job}
 
     @app.post("/api/emu/modules/{sn}/perfect")
     async def module_perfect(sn: str) -> dict:
         if emu.cfg.module(sn) is None:
             raise HTTPException(404, "no such module")
-        return {"modules": emu.perfect_mechanics(sn)}
+        n = emu.perfect_mechanics(sn)
+        try:
+            job = emu.jobs.start("perfect", only=sn).snapshot()
+        except RuntimeError as ex:
+            raise HTTPException(409, str(ex))
+        return {"modules": n, "job": job}
 
     @app.get("/api/emu/wall/job")
     async def wall_job() -> dict:

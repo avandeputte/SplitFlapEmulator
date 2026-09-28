@@ -74,7 +74,7 @@ Each module has a `mech` record the firmware cannot see and must calibrate again
 * faults: `hall` (`stuck_active`, `stuck_inactive`, `noisy`, `inverted`), `motor` (`dead`),
   `slip` (probability of a missed half-step), `vcc`
 
-All of it is editable live in the control panel (like re-mounting a magnet); **Perfect mechanics** sets a reel's true offset and revolution to exactly what its firmware believes, so nothing needs calibrating. Every module can
+All of it is editable live in the control panel (like re-mounting a magnet); **Perfect mechanics** sets a reel's true offset and revolution to the textbook 2832 / 4096 and writes the firmware to match, so nothing needs calibrating, now or after a blank boot. Every module can
 be power-cycled, reset, brown-outed (optionally corrupting one EEPROM byte, the classic BOD-off
 failure), or have its EEPROM blanked. The module's `T`, `Q` and `M` self-tests report what they
 would on such hardware.

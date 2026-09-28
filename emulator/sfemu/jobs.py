@@ -54,12 +54,13 @@ class WallJobs:
     async def _vsleep(self, virtual_s: float) -> None:
         await asyncio.sleep(virtual_s / max(0.1, self.emu.clock.speed))
 
-    def start(self, name: str) -> Job:
+    def start(self, name: str, only: Optional[str] = None) -> Job:
         if self.current and self.current.state == "running":
             raise RuntimeError(f"{self.current.name} is still running")
-        total = len(self.emu.cfg.modules)
-        job = Job(name, total)
-        fn = self.provision if name == "provision" else self.calibrate
+        sns = [m.sn for m in self.emu.cfg.modules if only is None or m.sn == only]
+        job = Job(name, len(sns))
+        fn = {"provision": self.provision, "calibrate": self.calibrate,
+              "perfect": lambda j: self.calibrate(j, sns=sns)}[name]
         job.task = asyncio.create_task(self._run(job, fn))
         self.current = job
         return job
@@ -129,9 +130,9 @@ class WallJobs:
             job.message = f"all {job.total} modules provisioned by slot; gateway layout set to {cfg.rows} x {cfg.cols}"
 
     # ---- calibrate: mXW<sn>:<trueOffset>:<trueRev>: then mXH<sn>, verified against the firmware ----
-    async def calibrate(self, job: Job) -> None:
+    async def calibrate(self, job: Job, sns: Optional[list] = None) -> None:
         cfg = self.emu.cfg
-        targets = {m.sn: (m.mech.offset, m.mech.rev) for m in cfg.modules}
+        targets = {m.sn: (m.mech.offset, m.mech.rev) for m in cfg.modules if sns is None or m.sn in sns}
         deadline = time.time() + 240 / max(0.1, self.emu.clock.speed)
         rounds = 0
         while time.time() < deadline:
@@ -170,4 +171,6 @@ class WallJobs:
             job.state = "failed"
             job.message = f"{len(left)} module(s) did not take the calibration: {', '.join(s[-4:] for s in left[:8])}"
         else:
-            job.message = f"every module's home offset and revolution now match its reel; wall homed"
+            job.message = (f"every module's home offset and revolution now match its reel; wall homed"
+                           if job.name == "calibrate" else
+                           f"reel and firmware both at 2832 / 4096 on {job.total} module(s); homed")
