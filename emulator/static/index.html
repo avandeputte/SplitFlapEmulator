@@ -99,11 +99,12 @@
     </div>
     <div class="row" style="margin-top:10px">
       <button id="job-provision">Provision whole wall</button>
-      <button id="job-calibrate">Calibrate every module</button>
+      <button id="perfect">Perfect mechanics on every module</button>
+      <button class="sec" id="job-calibrate">Calibrate every module via gateway</button>
       <button class="sec" id="job-cancel" style="display:none">Cancel</button>
       <span id="jobstatus" class="dim"></span>
     </div>
-    <small class="note">Both go through the gateway's own API (mXI by serial, then the restore-by-serial mXW frame with each reel's true offset and revolution, then a home by serial), so its registry and bus monitor see everything. Provisioning takes a few minutes at 1×: blank modules must finish homing to hear their frame.</small>
+    <small class="note"><b>Provision</b> goes through the gateway's own API (mXI by serial, then the display layout), so its registry sees everything; it takes a few minutes at 1× because blank modules must finish homing to hear their frame. <b>Perfect mechanics</b> sets each reel's <i>true</i> home offset and revolution to exactly what its firmware believes (2832 and the measured revolution), so nothing needs calibrating: no bus traffic, instant. <b>Calibrate via gateway</b> does the opposite: it writes each reel's true values into the firmware with the restore-by-serial frame and homes it, as an operator would.</small>
     <div class="row" style="margin-top:10px">
       <button class="bad" id="factory">Factory-fresh everything</button>
       <small class="note">Modules come back blank and advertising; the gateway forgets its settings and module list.</small>
@@ -205,6 +206,7 @@ function renderDetail() {
   d.innerHTML = `
     <div class="row" style="justify-content:space-between"><b>Slot ${m.cfg.slot} · <span class="mono">${m.cfg.sn}</span></b>
       <span><button class="sec" onclick="post('/api/emu/modules/${sel}/power',{on:${!m.cfg.power}})">${m.cfg.power ? 'Power off' : 'Power on'}</button>
+      <button onclick="post('/api/emu/modules/${sel}/perfect',{})" title="true offset and revolution := what the firmware believes">Perfect mechanics</button>
       <button class="sec" onclick="post('/api/emu/modules/${sel}/reset',{kind:'reset'})">Reset</button>
       <button class="warn" onclick="post('/api/emu/modules/${sel}/reset',{kind:'brownout',corrupt:false})">Brown-out</button>
       <button class="warn" onclick="post('/api/emu/modules/${sel}/reset',{kind:'brownout',corrupt:true})">Brown-out + EEPROM corruption</button>
@@ -239,6 +241,7 @@ function renderDetail() {
     vcc: +$('m-vcc').value, hall: $('m-hall').value, motor: $('m-motor').value, slip: +$('m-slip').value, chars: $('m-chars').value, label: $('m-label').value });
 }
 $('job-provision').onclick = () => post('/api/emu/wall/provision', {});
+$('perfect').onclick = () => post('/api/emu/wall/perfect', {});
 $('job-calibrate').onclick = () => post('/api/emu/wall/calibrate', {});
 $('job-cancel').onclick = () => post('/api/emu/wall/job/cancel', {});
 $('factory').onclick = () => { if (confirm('Wipe every module EEPROM, the gateway flash and start a fresh wall?')) post('/api/emu/factory-reset', {}); };

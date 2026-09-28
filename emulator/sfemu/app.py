@@ -207,6 +207,23 @@ class Emulator:
         self.save()
         return m
 
+    def perfect_mechanics(self, sn: Optional[str] = None) -> int:
+        """Set a module's (or every module's) TRUE home offset and revolution to exactly what its
+        firmware believes -- the firmware's default 2832 and the revolution it measured, or the
+        chip's nominal 2832 / 4096 if it has not reported yet. The reel is then perfectly
+        calibrated without a single frame on the bus, like a module built to spec."""
+        n = 0
+        for m in self.cfg.modules:
+            if sn is not None and m.sn != sn:
+                continue
+            fw = self.module_state.get(m.sn, {}).get("fw", {})
+            m.mech.offset = int(fw.get("off") or 2832)
+            m.mech.rev = int(fw.get("rev") or 4096)
+            self.hub.ctl(m.sn, self.cfg.mech_message(m))
+            n += 1
+        self.save()
+        return n
+
     async def factory_reset(self) -> None:
         """Every module back to a blank chip, the gateway to a blank flash, a fresh wall."""
         await self.sup.stop()
@@ -298,6 +315,16 @@ def create_app(emu: Emulator) -> FastAPI:
             return emu.jobs.start("calibrate").snapshot()
         except RuntimeError as ex:
             raise HTTPException(409, str(ex))
+
+    @app.post("/api/emu/wall/perfect")
+    async def wall_perfect() -> dict:
+        return {"modules": emu.perfect_mechanics()}
+
+    @app.post("/api/emu/modules/{sn}/perfect")
+    async def module_perfect(sn: str) -> dict:
+        if emu.cfg.module(sn) is None:
+            raise HTTPException(404, "no such module")
+        return {"modules": emu.perfect_mechanics(sn)}
 
     @app.get("/api/emu/wall/job")
     async def wall_job() -> dict:

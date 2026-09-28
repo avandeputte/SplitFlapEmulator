@@ -145,3 +145,23 @@ def test_wall_jobs_provision_and_calibrate(emu):
         assert s["fw"]["off"] == mech["offset"] and s["fw"]["rev"] == mech["rev"]
         idx, frac = shown_index(s)
         assert idx == 0 and frac < 0.05          # dead centre of flap 0 after the home
+
+
+def test_perfect_mechanics(emu):
+    # Knock one module's reel out of true, then make every reel perfect: the physical offset and
+    # revolution become what the firmware believes, and the reel shows flap 0 dead centre at once.
+    m0 = emu.state()["modules"][0]
+    sn = m0["cfg"]["sn"]
+    emu.emu.post(f"/api/emu/modules/{sn}/mech", json={"offset": m0["cfg"]["mech"]["offset"] + 30})
+    emu.vsleep(1)
+    idx, frac = shown_index(emu.module_state(sn))
+    assert not (idx == 0 and frac < 0.05)
+    r = emu.emu.post("/api/emu/wall/perfect")
+    assert r.status_code == 200 and r.json()["modules"] == 4
+    emu.vsleep(1)
+    for m in emu.state()["modules"]:
+        s, mech = m["state"], m["cfg"]["mech"]
+        assert mech["offset"] == s["fw"]["off"] and mech["rev"] == s["fw"]["rev"]
+        assert s["off"] == s["fw"]["off"] and s["rev"] == s["fw"]["rev"]
+        idx, frac = shown_index(s)
+        assert idx == 0 and frac < 0.05
