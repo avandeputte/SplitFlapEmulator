@@ -14,18 +14,21 @@ discovery message is the real thing, so the
 [companion app](https://github.com/avandeputte/SplitFlapGatewayCompanion) drives the emulator
 exactly as it drives hardware.
 
+It is a single Docker image, nothing else runs inside it.
+
 ```
  browser ──► :8080  gateway dashboard / REST / OTA        (the real firmware, port 80 inside)
  browser ──► :8090  emulator control panel  /             (faults, time, wall size, wire monitor)
                     virtual wall            /display
- companion ─► http://emulator:80                           (docker compose --profile companion)
- MQTT ──────► mosquitto:1883                               (docker compose --profile mqtt)
 ```
 
 ## Quick start
 
 ```sh
-docker compose up -d
+docker run -d --name splitflap-emulator -p 8080:80 -p 8090:8090 -v emulator-data:/data \
+  ghcr.io/avandeputte/splitflap-emulator:latest
+# or, from this repository:  docker compose up -d   (builds the same image)
+
 open http://localhost:8080      # the gateway, as shipped: no WiFi, no modules known yet
 open http://localhost:8090      # the emulator's control panel
 ```
@@ -42,8 +45,10 @@ Then do what you would do with a new wall:
 5. Calibrate. Every module's home offset is a little off, as on real hardware; the **Calibration**
    wizard has something real to fix, and the wall shows the half-turned flaps until it is fixed.
 
-With `--profile companion`, the companion is up on `http://localhost:8000`, already pointed at the
-emulated gateway, and registers itself so the gateway grows its **Companion** tab.
+To drive it from the [companion app](https://github.com/avandeputte/SplitFlapGatewayCompanion),
+run the companion wherever you normally do and point its `GATEWAY_URL` at the emulator's gateway
+port (`http://<host>:8080`); it registers itself and the gateway grows its **Companion** tab. An
+MQTT broker is likewise yours to supply: enter it on the gateway's Settings tab.
 
 ## What is emulated, and how faithfully
 
